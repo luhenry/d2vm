@@ -29,6 +29,7 @@ var (
 	cpus         uint
 	mem          uint
 	bios         string
+	kernel       string
 	qemuCmd      string
 	qemuDetached bool
 	networking   string
@@ -48,6 +49,8 @@ func init() {
 		defaultArch = "aarch64"
 	case "amd64":
 		defaultArch = "x86_64"
+	case "riscv64":
+		defaultArch = "riscv64"
 	case "s390x":
 		defaultArch = "s390x"
 	}
@@ -68,11 +71,12 @@ func init() {
 
 	// VM configuration
 	flags.StringVar(&accel, "accel", defaultAccel, "Choose acceleration mode. Use 'tcg' to disable it.")
-	flags.StringVar(&arch, "arch", defaultArch, "Type of architecture to use, e.g. x86_64, aarch64, s390x")
+	flags.StringVar(&arch, "arch", defaultArch, "Type of architecture to use, e.g. x86_64, aarch64, riscv64, s390x")
 	flags.UintVar(&cpus, "cpus", 1, "Number of CPUs")
 	flags.UintVar(&mem, "mem", 1024, "Amount of memory in MB")
 
 	flags.StringVar(&bios, "bios", "", "Path to the optional bios binary")
+	flags.StringVar(&kernel, "kernel", "", "Path to the optional kernel binary, on riscv64 it is used to load the UEFI firmware, e.g. U-Boot (default: auto-detected)")
 
 	// Backend configuration
 	flags.StringVar(&qemuCmd, "qemu", "", "Path to the qemu binary (otherwise look in $PATH)")
@@ -109,6 +113,7 @@ func Qemu(cmd *cobra.Command, args []string) {
 		qemu.WithStdout(os.Stdout),
 		qemu.WithStderr(os.Stderr),
 		qemu.WithBios(bios),
+		qemu.WithKernel(kernel),
 	}
 	if enableGUI {
 		opts = append(opts, qemu.WithGUI())

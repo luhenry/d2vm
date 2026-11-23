@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -34,6 +35,8 @@ func init() {
 		defaultArch = "aarch64"
 	case "amd64":
 		defaultArch = "x86_64"
+	case "riscv64":
+		defaultArch = "riscv64"
 	case "s390x":
 		defaultArch = "s390x"
 	}
@@ -145,6 +148,11 @@ func Run(ctx context.Context, path string, opts ...Option) error {
 func (c *config) runQemuLocal(ctx context.Context) (err error) {
 	var args []string
 	args, err = c.buildQemuCmdline()
+	defer func() {
+		for _, v := range c.tmpFiles {
+			os.Remove(v)
+		}
+	}()
 	if err != nil {
 		return err
 	}
@@ -201,14 +209,6 @@ func (c *config) buildQemuCmdline() ([]string, error) {
 		qemuArgs = append(qemuArgs, "-bios", c.bios)
 	}
 
-	// Need to specify the vcpu type when running qemu on arm64 platform, for security reason,
-	// the vcpu should be "host" instead of other names such as "cortex-a53"...
-	if c.arch == "aarch64" && runtime.GOARCH != "arm64" {
-		qemuArgs = append(qemuArgs, "-cpu", "cortex-a57")
-	} else {
-		qemuArgs = append(qemuArgs, "-cpu", "host")
-	}
-
 	// goArch is the GOARCH equivalent of config.Arch
 	var goArch string
 	switch c.arch {
@@ -218,6 +218,8 @@ func (c *config) buildQemuCmdline() ([]string, error) {
 		goArch = "arm64"
 	case "x86_64":
 		goArch = "amd64"
+	case "riscv64":
+		goArch = "riscv64"
 	default:
 		return nil, fmt.Errorf("%s is an unsupported architecture.", c.arch)
 	}
@@ -227,10 +229,35 @@ func (c *config) buildQemuCmdline() ([]string, error) {
 		c.accel = ""
 	}
 
+	// Need to specify the vcpu type when running qemu on arm64 platform, for security reason,
+	// the vcpu should be "host" instead of other names such as "cortex-a53"...
+	switch {
+	case c.arch == "aarch64" && runtime.GOARCH != "arm64":
+		qemuArgs = append(qemuArgs, "-cpu", "cortex-a57")
+	case c.arch == "riscv64" && !strings.Contains(c.accel, "kvm"):
+		// the "host" cpu is only available with kvm, "max" enables all the extensions
+		// supported by qemu, including the ones required by the RVA23 profile
+		qemuArgs = append(qemuArgs, "-cpu", "max")
+	default:
+		qemuArgs = append(qemuArgs, "-cpu", "host")
+	}
+
+	if c.arch == "riscv64" {
+		firmware, err := c.riscvFirmwareArgs()
+		if err != nil {
+			return nil, err
+		}
+		qemuArgs = append(qemuArgs, firmware...)
+	} else if c.kernel != "" {
+		qemuArgs = append(qemuArgs, "-kernel", c.kernel)
+	}
+
 	if c.accel != "" {
 		switch c.arch {
 		case "s390x":
 			qemuArgs = append(qemuArgs, "-machine", fmt.Sprintf("s390-ccw-virtio,accel=%s", c.accel))
+		case "riscv64":
+			qemuArgs = append(qemuArgs, "-machine", fmt.Sprintf("virt,accel=%s", c.accel))
 		case "aarch64":
 			gic := ""
 			// VCPU supports less PA bits (36) than requested by the memory map (40)
@@ -248,7 +275,7 @@ func (c *config) buildQemuCmdline() ([]string, error) {
 		switch c.arch {
 		case "s390x":
 			qemuArgs = append(qemuArgs, "-machine", "s390-ccw-virtio")
-		case "aarch64":
+		case "aarch64", "riscv64":
 			qemuArgs = append(qemuArgs, "-machine", "virt")
 		default:
 			qemuArgs = append(qemuArgs, "-machine", "q35")
@@ -272,11 +299,16 @@ func (c *config) buildQemuCmdline() ([]string, error) {
 	var lastDisk int
 	for i, d := range c.disks {
 		index := i
+		drive := "file=" + d.Path
 		if d.Format != "" {
-			qemuArgs = append(qemuArgs, "-drive", "file="+d.Path+",format="+d.Format+",index="+strconv.Itoa(index)+",media=disk")
-		} else {
-			qemuArgs = append(qemuArgs, "-drive", "file="+d.Path+",index="+strconv.Itoa(index)+",media=disk")
+			drive += ",format=" + d.Format
 		}
+		drive += ",index=" + strconv.Itoa(index) + ",media=disk"
+		if c.arch == "riscv64" {
+			// the riscv64 virt machine has no default disk controller
+			drive += ",if=virtio"
+		}
+		qemuArgs = append(qemuArgs, "-drive", drive)
 		lastDisk = index
 	}
 
@@ -287,9 +319,13 @@ func (c *config) buildQemuCmdline() ([]string, error) {
 
 	if c.netdevConfig != "" {
 		mac := generateMAC()
-		if c.arch == "s390x" {
+		switch c.arch {
+		case "s390x":
 			qemuArgs = append(qemuArgs, "-device", "virtio-net-ccw,netdev=t0,mac="+mac.String())
-		} else {
+		case "riscv64":
+			// use the mmio transport, as the pci device requires an option rom that is not always available
+			qemuArgs = append(qemuArgs, "-device", "virtio-net-device,netdev=t0,mac="+mac.String())
+		default:
 			qemuArgs = append(qemuArgs, "-device", "virtio-net-pci,netdev=t0,mac="+mac.String())
 		}
 		forwardings, err := buildQemuForwardings(c.publishedPorts)
@@ -306,6 +342,74 @@ func (c *config) buildQemuCmdline() ([]string, error) {
 	}
 
 	return qemuArgs, nil
+}
+
+// riscvUBootPaths are the well known locations of the U-Boot S-mode binary for the qemu riscv64 virt machine
+var riscvUBootPaths = []string{
+	"/usr/lib/u-boot/qemu-riscv64_smode/uboot.elf",
+	"/usr/lib/u-boot/qemu-riscv64_smode/u-boot.bin",
+	"/usr/share/u-boot/qemu-riscv64_smode/uboot.elf",
+	"/usr/share/u-boot/qemu-riscv64_smode/u-boot.bin",
+	"/usr/share/uboot/qemu-riscv64_smode/u-boot.bin",
+}
+
+// riscvEDK2Paths are the well known locations of the EDK II code and variables store for the qemu riscv64 virt machine
+var riscvEDK2Paths = [][2]string{
+	{"/usr/share/qemu-efi-riscv64/RISCV_VIRT_CODE.fd", "/usr/share/qemu-efi-riscv64/RISCV_VIRT_VARS.fd"},
+	{"/usr/share/edk2/riscv/RISCV_VIRT_CODE.fd", "/usr/share/edk2/riscv/RISCV_VIRT_VARS.fd"},
+}
+
+// riscvFirmwareArgs returns the qemu arguments used to load the UEFI firmware needed to boot
+// the grub-efi bootloader on the riscv64 virt machine.
+// OpenSBI, loaded by default by qemu or provided using the bios option, runs first and starts
+// a UEFI capable firmware: U-Boot (loaded as kernel) or EDK II (loaded as pflash).
+func (c *config) riscvFirmwareArgs() ([]string, error) {
+	var args []string
+	if c.bios != "" {
+		args = append(args, "-bios", c.bios)
+	}
+	if c.kernel != "" {
+		return append(args, "-kernel", c.kernel), nil
+	}
+	for _, v := range riscvUBootPaths {
+		if _, err := os.Stat(v); err == nil {
+			log.Debugf("Using U-Boot firmware %s", v)
+			return append(args, "-kernel", v), nil
+		}
+	}
+	for _, v := range riscvEDK2Paths {
+		if _, err := os.Stat(v[0]); err != nil {
+			continue
+		}
+		log.Debugf("Using EDK II firmware %s", v[0])
+		vars, err := copyToTemp(v[1])
+		if err != nil {
+			return nil, err
+		}
+		c.tmpFiles = append(c.tmpFiles, vars)
+		return append(args,
+			"-drive", "if=pflash,format=raw,unit=0,readonly=on,file="+v[0],
+			"-drive", "if=pflash,format=raw,unit=1,file="+vars,
+		), nil
+	}
+	return nil, fmt.Errorf("no UEFI firmware found for riscv64: install U-Boot (u-boot-qemu) or EDK II (qemu-efi-riscv64), or provide the U-Boot binary path using the kernel option")
+}
+
+func copyToTemp(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp("", "d2vm-*-"+filepath.Base(path))
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if _, err := f.Write(b); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func (c *config) discoverBinaries() error {

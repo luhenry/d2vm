@@ -45,12 +45,14 @@ type config struct {
 	cpus           uint
 	memory         uint
 	bios           string
+	kernel         string
 	accel          string
 	detached       bool
 	qemuBinPath    string
 	qemuImgPath    string
 	publishedPorts []PublishedPort
 	netdevConfig   string
+	tmpFiles       []string
 
 	stdin  io.Reader
 	stdout io.Writer
@@ -96,6 +98,14 @@ func WithMemory(memory uint) Option {
 func WithBios(bios string) Option {
 	return func(c *config) {
 		c.bios = bios
+	}
+}
+
+// WithKernel sets the binary passed to qemu's -kernel option.
+// On riscv64, it is used to load the UEFI capable firmware (e.g. U-Boot) started by OpenSBI.
+func WithKernel(kernel string) Option {
+	return func(c *config) {
+		c.kernel = kernel
 	}
 }
 
