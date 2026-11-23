@@ -5,6 +5,7 @@ on:
     tags: [ "v*" ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 jobs:
   tests:
     name: Tests
@@ -153,6 +154,52 @@ jobs:
     - name: Run end-to-end tests
       run: E2E_IMAGES=${{ matrix.image }} make e2e
 
+  e2e-tests-riscv64:
+    name: End to end Tests (riscv64)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+        - ubuntu:24.04
+        - debian:13
+    steps:
+    - name: Free Disk Space (Ubuntu)
+      uses: linka-cloud/free-disk-space@main
+
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        # fetching all tags is required for the Makefile to compute the right version
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: "1.25"
+
+    # the riscv64 images are built on the amd64 runner using the QEMU user emulation
+    - name: Set up QEMU dependency
+      uses: docker/setup-qemu-action@v1
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - name: Setup dependencies
+      run: sudo apt update && sudo apt install -y util-linux udev parted e2fsprogs dosfstools mount tar qemu-utils qemu-system-misc opensbi u-boot-qemu
+
+    - name: Share cache with other actions
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/go/pkg/mod
+          /tmp/.buildx-cache
+        key: ${{ runner.os }}-e2e-tests-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-tests-
+
+    - name: Run end-to-end tests
+      run: E2E_IMAGES=${{ matrix.image }} E2E_PLATFORM=linux/riscv64 make e2e
+
   docs-up-to-date:
     name: Docs up to date
     runs-on: ubuntu-latest
@@ -298,6 +345,7 @@ jobs:
     - docs-up-to-date
     - build
     - e2e-tests
+    - e2e-tests-riscv64
 
     steps:
     - name: Checkout

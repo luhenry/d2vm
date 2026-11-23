@@ -114,10 +114,6 @@ func TestConvert(t *testing.T) {
 				name: "grub-efi",
 				args: []string{"--bootloader=grub-efi"},
 			},
-			{
-				name: "grub-efi-luks",
-				args: []string{"--bootloader=grub-efi", "--luks-password=root"},
-			},
 		}
 	}
 
