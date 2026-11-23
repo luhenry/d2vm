@@ -45,6 +45,42 @@ if the file is missing, the build cannot succeed.
 
 Obviously, **Distroless** images are not supported.
 
+## Supported architectures:
+
+The architecture of the virtual machine image is selected with the `--platform` flag.
+
+| Platform        | Bootloaders                                   | Distributions       |
+|-----------------|-----------------------------------------------|---------------------|
+| `linux/amd64`   | syslinux (default), grub, grub-bios, grub-efi | all                 |
+| `linux/arm64`   | grub-efi                                      | all                 |
+| `linux/riscv64` | grub-efi                                      | Ubuntu (24.04+), Debian (13+) |
+
+Building an image for a platform that is not the host one requires
+[QEMU user emulation](https://docs.docker.com/build/building/multi-platform/#qemu) to be configured.
+
+### riscv64
+
+The riscv64 images target the QEMU `virt` machine: they boot using UEFI, so QEMU needs a UEFI capable
+firmware started by OpenSBI, either U-Boot (`u-boot-qemu` on Debian / Ubuntu) or EDK II (`qemu-efi-riscv64`).
+
+```bash
+sudo d2vm convert ubuntu:24.04 --platform linux/riscv64 -p root -o ubuntu.qcow2
+d2vm run qemu --arch riscv64 --mem 2048 ubuntu.qcow2
+```
+
+`d2vm run qemu` looks for the firmware at its usual locations, the U-Boot binary path can be set using the `--kernel` flag.
+The image can also be run using QEMU directly:
+
+```bash
+qemu-system-riscv64 -machine virt -cpu max -m 2G -smp 2 -nographic \
+    -kernel /usr/lib/u-boot/qemu-riscv64_smode/uboot.elf \
+    -drive file=ubuntu.qcow2,format=qcow2,if=virtio \
+    -netdev user,id=net0 -device virtio-net-device,netdev=net0 \
+    -device virtio-rng-pci
+```
+
+*Note: Ubuntu 25.10 and later require the RVA23 profile, which needs QEMU 10.1+.*
+
 ## Prerequisites
 
 ### osx
