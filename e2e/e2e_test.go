@@ -43,15 +43,17 @@ type test struct {
 type img struct {
 	name string
 	luks string
+	// riscv64 is true when the image is available and supported for the linux/riscv64 platform
+	riscv64 bool
 }
 
 var (
 	images = []img{
 		{name: "alpine:3.23", luks: "Enter passphrase for /dev/sda2:"},
 		{name: "ubuntu:22.04", luks: "Please unlock disk root:"},
-		{name: "ubuntu:24.04", luks: "Please unlock disk root:"},
+		{name: "ubuntu:24.04", luks: "Please unlock disk root:", riscv64: true},
 		{name: "debian:12", luks: "Please unlock disk root:"},
-		{name: "debian:13", luks: "Please unlock disk root:"},
+		{name: "debian:13", luks: "Please unlock disk root:", riscv64: true},
 		{name: "centos:8", luks: "Please enter passphrase for disk"},
 		{name: "quay.io/centos/centos:stream10", luks: "Please enter passphrase for disk"},
 		{name: "almalinux:10", luks: "Please enter passphrase for disk"},
@@ -64,11 +66,20 @@ var (
 		}
 		return imgs
 	}()
-	imgs = flag.String("images", "", "comma separated list of images to test, must be one of: "+strings.Join(imgNames, ","))
+	imgs     = flag.String("images", "", "comma separated list of images to test, must be one of: "+strings.Join(imgNames, ","))
+	platform = flag.String("platform", d2vm.Arch, "platform of the images to test: linux/amd64 or linux/riscv64")
 )
 
 func TestConvert(t *testing.T) {
 	require := require2.New(t)
+	riscv64 := *platform == "linux/riscv64"
+	// emulated or slow hardware needs more time to boot
+	timeout := 2 * time.Minute
+	arch := ""
+	if riscv64 {
+		timeout = 15 * time.Minute
+		arch = "riscv64"
+	}
 	tests := []test{
 		{
 			name: "single-partition",
@@ -95,6 +106,19 @@ func TestConvert(t *testing.T) {
 			args: []string{"--bootloader=grub", "--luks-password=root"},
 			efi:  true,
 		},
+	}
+	if riscv64 {
+		// only grub-efi is supported on riscv64
+		tests = []test{
+			{
+				name: "grub-efi",
+				args: []string{"--bootloader=grub-efi"},
+			},
+			{
+				name: "grub-efi-luks",
+				args: []string{"--bootloader=grub-efi", "--luks-password=root"},
+			},
+		}
 	}
 
 	var testImgs []img
@@ -123,6 +147,9 @@ imgs:
 				if (strings.Contains(img.name, "centos") || strings.Contains(img.name, "almalinux") || strings.Contains(img.name, "rocky")) && tt.efi {
 					t.Skip("efi not supported for CentOS")
 				}
+				if riscv64 && !img.riscv64 {
+					continue
+				}
 				t.Run(img.name, func(t *testing.T) {
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
@@ -135,7 +162,7 @@ imgs:
 						require.NoError(os.Remove(out))
 					}
 
-					require.NoError(docker.RunD2VM(ctx, d2vm.Image, d2vm.Version, dir, dir, "convert", append([]string{"-p", "root", "-o", "/out/" + filepath.Base(out), "-v", "--keep-cache", "--boot-size=250", img.name}, tt.args...)...))
+					require.NoError(docker.RunD2VM(ctx, d2vm.Image, d2vm.Version, dir, dir, "convert", append([]string{"-p", "root", "-o", "/out/" + filepath.Base(out), "-v", "--keep-cache", "--boot-size=250", "--platform", *platform, img.name}, tt.args...)...))
 
 					inr, inw := io.Pipe()
 					defer inr.Close()
@@ -143,7 +170,7 @@ imgs:
 					defer outw.Close()
 					var success atomic.Bool
 					go func() {
-						time.AfterFunc(2*time.Minute, cancel)
+						time.AfterFunc(timeout, cancel)
 						defer inw.Close()
 						defer outr.Close()
 						login := []byte("login:")
@@ -202,7 +229,7 @@ imgs:
 							cancel()
 						}
 					}()
-					opts := []qemu.Option{qemu.WithStdin(inr), qemu.WithStdout(io.MultiWriter(outw, os.Stdout)), qemu.WithStderr(io.Discard), qemu.WithMemory(2048), qemu.WithCPUs(2)}
+					opts := []qemu.Option{qemu.WithStdin(inr), qemu.WithStdout(io.MultiWriter(outw, os.Stdout)), qemu.WithStderr(io.Discard), qemu.WithMemory(2048), qemu.WithCPUs(2), qemu.WithArch(arch)}
 					if tt.efi {
 						opts = append(opts, qemu.WithBios("/usr/share/ovmf/OVMF.fd"))
 					}

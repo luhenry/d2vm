@@ -10,13 +10,14 @@ d2vm run qemu [options] [image-path] [flags]
 
 ```
       --accel string            Choose acceleration mode. Use 'tcg' to disable it. (default "kvm:tcg")
-      --arch string             Type of architecture to use, e.g. x86_64, aarch64, s390x (default "x86_64")
+      --arch string             Type of architecture to use, e.g. x86_64, aarch64, riscv64, s390x (default "x86_64")
       --bios string             Path to the optional bios binary
       --cpus uint               Number of CPUs (default 1)
       --detached                Set qemu container to run in the background
       --disk disk               Disk config, may be repeated. [file=]path[,size=1G][,format=qcow2] (default [])
       --gui                     Set qemu to use video output instead of stdio
   -h, --help                    help for qemu
+      --kernel string           Path to the optional kernel binary, on riscv64 it is used to load the UEFI firmware, e.g. U-Boot (default: auto-detected)
       --mem uint                Amount of memory in MB (default 1024)
       --networking string       Networking mode. Valid options are 'default', 'user', 'bridge[,name]', tap[,name] and 'none'. 'user' uses QEMUs userspace networking. 'bridge' connects to a preexisting bridge. 'tap' uses a prexisting tap device. 'none' disables networking.` (default "user")
       --publish multiple-flag   Publish a vm's port(s) to the host (default []) (default A multiple flag is a type of flag that can be repeated any number of times)
