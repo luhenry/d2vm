@@ -53,7 +53,19 @@ var (
 	extraHosts map[string]string
 )
 
+const (
+	defaultBootSize        = 100
+	defaultBootSizeRiscv64 = 512
+)
+
 func validateFlags() (err error) {
+	if bootSize == 0 {
+		bootSize = defaultBootSize
+		// the riscv64 kernels and initramfs do not always fit in the default boot partition
+		if platform == "linux/riscv64" {
+			bootSize = defaultBootSizeRiscv64
+		}
+	}
 	switch platform {
 	case "linux/amd64":
 		if bootloader == "" {
@@ -127,7 +139,7 @@ func buildFlags() *pflag.FlagSet {
 	flags.StringVarP(&containerDiskTag, "tag", "t", "", "Container disk Docker image tag")
 	flags.BoolVar(&push, "push", false, "Push the container disk image to the registry")
 	flags.BoolVar(&splitBoot, "split-boot", false, "Split the boot partition from the root partition")
-	flags.Uint64Var(&bootSize, "boot-size", 100, "Size of the boot partition in MB")
+	flags.Uint64Var(&bootSize, "boot-size", 0, fmt.Sprintf("Size of the boot partition in MB (default %d, %d on riscv64)", defaultBootSize, defaultBootSizeRiscv64))
 	flags.StringVar(&bootFS, "boot-fs", "", "Filesystem to use for the boot partition, ext4 or fat32")
 	flags.StringVar(&bootloader, "bootloader", "", "Bootloader to use: syslinux, grub, grub-bios, grub-efi, defaults to syslinux on amd64 and grub-efi on arm64 and riscv64")
 	flags.StringVar(&luksPassword, "luks-password", "", "Password to use for the LUKS encrypted root partition. If not set, the root partition will not be encrypted")

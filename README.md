@@ -205,7 +205,7 @@ Flags:
       --append-to-cmdline string   Extra kernel cmdline arguments to append to the generated one
       --add-host strings           Add a custom host-to-IP mapping (host:ip) to the /etc/hosts file in the generated image
       --boot-fs string             Filesystem to use for the boot partition, ext4 or fat32
-      --boot-size uint             Size of the boot partition in MB (default 100)
+      --boot-size uint             Size of the boot partition in MB (default 100, 512 on riscv64)
       --bootloader string          Bootloader to use: syslinux, grub, grub-bios, grub-efi, defaults to syslinux on amd64 and grub-efi on arm64 and riscv64
       --dns strings                DNS servers to set in the generated image
       --dns-search strings         DNS search domains to set in the generated image
@@ -367,7 +367,7 @@ Flags:
       --append-to-cmdline string   Extra kernel cmdline arguments to append to the generated one
       --add-host strings           Add a custom host-to-IP mapping (host:ip) to the /etc/hosts file in the generated image
       --boot-fs string             Filesystem to use for the boot partition, ext4 or fat32
-      --boot-size uint             Size of the boot partition in MB (default 100)
+      --boot-size uint             Size of the boot partition in MB (default 100, 512 on riscv64)
       --bootloader string          Bootloader to use: syslinux, grub, grub-bios, grub-efi, defaults to syslinux on amd64 and grub-efi on arm64 and riscv64
       --dns strings                DNS servers to set in the generated image
       --dns-search strings         DNS search domains to set in the generated image
