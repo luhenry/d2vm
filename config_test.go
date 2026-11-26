@@ -98,6 +98,10 @@ func TestConfig(t *testing.T) {
 			config: configUbuntu,
 		},
 		{
+			image:  "debian:11",
+			config: configDebian,
+		},
+		{
 			image:  "debian:12",
 			config: configDebian,
 		},
